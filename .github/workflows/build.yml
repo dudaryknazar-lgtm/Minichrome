@@ -1,7 +1,10 @@
 name: Build APK
 on:
   push:
+    branches: [main]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -11,14 +14,30 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      - name: Accept SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - uses: gradle/actions/setup-gradle@v4
-      - run: chmod +x gradlew
-      - run: ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
-      - uses: actions/upload-artifact@v4
+      - name: Build
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
+      - name: Publish log to buildlog branch
         if: always()
-        with:
-          name: MiniBrowser-debug-apk
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            build.log
+        run: |
+          git config user.name github-actions
+          git config user.email actions@github.com
+          mkdir /tmp/bl && cp build.log /tmp/bl/ 2>/dev/null || echo "no build.log" > /tmp/bl/build.log
+          git checkout --orphan buildlog
+          git rm -rfq . 
+          cp /tmp/bl/build.log .
+          git add build.log
+          git commit -qm "build log $GITHUB_RUN_NUMBER"
+          git push -f origin buildlog
+      - name: Release APK
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk MiniBrowser.apk
+          gh release create "apk-${{ github.run_number }}" MiniBrowser.apk --title "MiniBrowser APK #${{ github.run_number }}" --notes "Debug APK"

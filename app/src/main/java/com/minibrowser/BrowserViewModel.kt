@@ -60,7 +60,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /** Екрани, що відкриваються поверх браузера. */
-enum class Screen { TABS, HISTORY, BOOKMARKS, DOWNLOADS, SETTINGS, PRIVACY, COOKIES, PERMISSIONS, FILTERS, PRIVATE_INFO }
+enum class Screen { TABS, HISTORY, BOOKMARKS, DOWNLOADS, SETTINGS, PRIVACY, COOKIES, PERMISSIONS, FILTERS, PRIVATE_INFO, EXPOSURE }
 
 class CustomViewState(val view: View, val callback: WebChromeClient.CustomViewCallback)
 
@@ -341,10 +341,11 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), EngineHost {
         cookies.deleteCookie(tab.url, name, tab.isPrivate)
     }
 
+    /** Видаляє cookie та сховище (localStorage, IndexedDB) поточного сайту. */
     fun clearSiteCookies() {
         val tab = tabManager.active ?: return
-        val n = cookies.clearSite(tab.url, tab.isPrivate)
-        toast("Видалено cookie: $n")
+        val n = privacy.clearSiteData(tab.host, tab.isPrivate)
+        toast("Видалено cookie: $n; дані сайту (localStorage тощо) очищено")
     }
 
     fun clearAllCookies() {
@@ -369,14 +370,16 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), EngineHost {
         }
     }
 
-    fun setSiteProtection(enabled: Boolean) {
+    fun siteLevel(): com.minibrowser.privacy.ProtectionLevel = privacy.levelFor(tabManager.active?.host)
+
+    fun setSiteLevel(level: com.minibrowser.privacy.ProtectionLevel) {
         val tab = tabManager.active ?: return
         val host = tab.host.ifEmpty { return }
-        privacy.setSiteProtection(host, enabled)
+        privacy.setSiteLevel(host, level)
         engine.reload(tab.id)
     }
 
-    fun isSiteProtectionOff(): Boolean = privacy.isProtectionOffFor(tabManager.active?.host)
+    fun resetSiteLevel(key: String) = privacy.resetSiteLevel(key)
 
     // ------------------------------------------------------------ діалоги: дозволи, JS, завантаження
     fun answerPermission(allowed: Set<SitePermissionType>, remember: Boolean) {

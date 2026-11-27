@@ -58,6 +58,7 @@ import com.minibrowser.BrowserViewModel
 import com.minibrowser.Screen
 import com.minibrowser.data.UrlUtils
 import com.minibrowser.privacy.PermissionDecision
+import com.minibrowser.privacy.ProtectionLevel
 import com.minibrowser.privacy.SitePermissionType
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -159,24 +160,43 @@ fun PrivacySettingsScreen(vm: BrowserViewModel) {
             SectionHeader("Керування")
             NavRow(Icons.Filled.Storage, "Менеджер cookie", "Перегляд, видалення, автоочищення", onClick = { vm.open(Screen.COOKIES) })
             NavRow(Icons.Filled.Language, "Дозволи сайтів", "Камера, мікрофон, геолокація та інші", onClick = { vm.open(Screen.PERMISSIONS) })
+            NavRow(Icons.Filled.Visibility, "Що бачать сайти", "Які дані про пристрій і браузер доступні сайтам", onClick = { vm.open(Screen.EXPOSURE) })
             NavRow(Icons.Filled.Tune, "Списки фільтрів", "EasyList, EasyPrivacy, шкідливі домени — оновлення", onClick = { vm.open(Screen.FILTERS) })
             NavRow(Icons.Filled.VisibilityOff, "Приватний перегляд: що зберігається", "Що не записується, а що бачать сайти й мережа", onClick = { vm.open(Screen.PRIVATE_INFO) })
             NavRow(Icons.Filled.DeleteSweep, "Очистити дані перегляду", "Історія, cookie, кеш, дані сайтів", onClick = { dialogClear = true })
 
-            SectionHeader("Сайти без захисту (сумісність)")
-            if (s.protectionOffSites.isEmpty()) {
-                InfoCard("Список порожній. Захист для окремого сайту вимикається в панелі приватності (іконка щита в адресному рядку).")
+            SectionHeader("Рівні захисту сайтів")
+            SwitchRow(
+                "Суворий рівень за замовчуванням",
+                "Для всіх сайтів без власного рівня: блок усіх сторонніх скриптів/iframe/XHR, без сторонніх cookie, лише https, очищення даних сайту після виходу. Частина сайтів працюватиме некоректно — для них у панелі приватності можна обрати інший рівень.",
+                s.strictByDefault, { v -> vm.updateSettings { it.copy(strictByDefault = v) } },
+                icon = Icons.Filled.Security,
+            )
+            SwitchRow(
+                "Автоматично відкривати через https",
+                "Змінює http на https (крім IP-адрес і локальних імен). Якщо сайт не відповідає по https, застосунок запитає, чи відкривати без шифрування.",
+                s.httpsUpgrade, { v -> vm.updateSettings { it.copy(httpsUpgrade = v) } },
+                icon = Icons.Filled.Lock,
+            )
+            val overrides = remember(s.protectionOffSites, s.strictSites, s.standardSites) {
+                (s.protectionOffSites.map { it to ProtectionLevel.OFF } +
+                    s.strictSites.map { it to ProtectionLevel.STRICT } +
+                    s.standardSites.map { it to ProtectionLevel.STANDARD }).sortedBy { it.first }
+            }
+            if (overrides.isEmpty()) {
+                InfoCard("Власних рівнів немає. Рівень окремого сайту обирається в панелі приватності (іконка щита в адресному рядку).")
             } else {
-                s.protectionOffSites.sorted().forEach { site ->
+                overrides.forEach { (site, lvl) ->
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)
                             .clip(RoundedCornerShape(18.dp)).background(c.card).padding(start = 16.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(site, color = c.text, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { vm.updateSettings { it.copy(protectionOffSites = it.protectionOffSites - site) } }) {
-                            Text("Увімкнути захист", color = c.accent)
+                        Column(Modifier.weight(1f)) {
+                            Text(site, color = c.text)
+                            Text(lvl.label, color = if (lvl == ProtectionLevel.OFF) c.warning else c.secondary, fontSize = 12.sp)
                         }
+                        TextButton(onClick = { vm.resetSiteLevel(site) }) { Text("За замовчуванням", color = c.accent) }
                     }
                 }
             }
@@ -284,8 +304,8 @@ fun CookieManagerScreen(vm: BrowserViewModel) {
                             vm.clearSiteCookies()
                             refresh++
                         },
-                        enabled = cookies.isNotEmpty(), modifier = Modifier.weight(1f),
-                    ) { Text("Очистити cookie сайту", color = if (cookies.isNotEmpty()) c.accent else c.secondary, fontSize = 13.sp) }
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Очистити cookie й дані сайту", color = c.accent, fontSize = 13.sp) }
                     OutlinedButton(onClick = { confirmAll = true }, modifier = Modifier.weight(1f)) {
                         Text("Очистити всі cookie", color = c.danger, fontSize = 13.sp)
                     }

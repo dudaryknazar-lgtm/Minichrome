@@ -35,6 +35,13 @@ data class BrowserSettings(
     val cleanupKeepHosts: Set<String> = emptySet(),
     /** Сайти, для яких захист вимкнено (сумісність). Ключ — зареєстрований домен. */
     val protectionOffSites: Set<String> = emptySet(),
+    /** Сайти з явно заданим суворим / стандартним рівнем захисту (ключ — зареєстрований домен). */
+    val strictSites: Set<String> = emptySet(),
+    val standardSites: Set<String> = emptySet(),
+    /** Рівень за замовчуванням для сайтів без власного налаштування: true — «Суворий». */
+    val strictByDefault: Boolean = false,
+    /** Автоматично відкривати http-адреси через https (при помилці — запит користувачу). */
+    val httpsUpgrade: Boolean = true,
 
     // Завантаження
     val askBeforeDownload: Boolean = true,
@@ -73,6 +80,10 @@ class SettingsStore(context: Context) {
             cleanupHistory = prefs.getBoolean("cleanupHistory", d.cleanupHistory),
             cleanupKeepHosts = prefs.getStringSet("cleanupKeepHosts", emptySet())?.toSet() ?: emptySet(),
             protectionOffSites = prefs.getStringSet("protectionOffSites", emptySet())?.toSet() ?: emptySet(),
+            strictSites = prefs.getStringSet("strictSites", emptySet())?.toSet() ?: emptySet(),
+            standardSites = prefs.getStringSet("standardSites", emptySet())?.toSet() ?: emptySet(),
+            strictByDefault = prefs.getBoolean("strictByDefault", d.strictByDefault),
+            httpsUpgrade = prefs.getBoolean("httpsUpgrade", d.httpsUpgrade),
             askBeforeDownload = prefs.getBoolean("askBeforeDownload", d.askBeforeDownload),
             downloadWifiOnly = prefs.getBoolean("downloadWifiOnly", d.downloadWifiOnly),
         )
@@ -102,6 +113,10 @@ class SettingsStore(context: Context) {
             .putBoolean("cleanupHistory", s.cleanupHistory)
             .putStringSet("cleanupKeepHosts", s.cleanupKeepHosts)
             .putStringSet("protectionOffSites", s.protectionOffSites)
+            .putStringSet("strictSites", s.strictSites)
+            .putStringSet("standardSites", s.standardSites)
+            .putBoolean("strictByDefault", s.strictByDefault)
+            .putBoolean("httpsUpgrade", s.httpsUpgrade)
             .putBoolean("askBeforeDownload", s.askBeforeDownload)
             .putBoolean("downloadWifiOnly", s.downloadWifiOnly)
             .apply()

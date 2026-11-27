@@ -30,6 +30,11 @@ data class PrivacySnapshot(
     val suspicious: List<SuspiciousRequest> = emptyList(),
     val fingerprintAttempts: List<FingerprintAttempt> = emptyList(),
     val permissionEvents: List<PermissionEvent> = emptyList(),
+    /** Сторонні запити, заблоковані суворим рівнем (скрипти, iframe, XHR/fetch, object). */
+    val strictBlocked: Int = 0,
+    val strictHosts: List<Pair<String, Int>> = emptyList(),
+    /** 1, якщо адресу цієї сторінки було автоматично змінено з http на https. */
+    val httpsUpgraded: Int = 0,
 ) {
     fun blocked(c: ListCategory) = blockedByCategory[c] ?: 0
     fun blockedDomains(c: ListCategory) = blockedDomainsByCategory[c] ?: 0
@@ -41,6 +46,9 @@ private class PageStats(var pageUrl: String) {
     var thirdParty = 0
     var blocked = 0
     var cookieSuppressed = 0
+    var strictBlocked = 0
+    var httpsUpgraded = 0
+    val strictHosts = HashMap<String, Int>()
     val blockedByCat = HashMap<ListCategory, Int>()
     val blockedDomains = HashMap<ListCategory, HashSet<String>>()
     val detectedDomains = HashMap<ListCategory, HashSet<String>>()
@@ -83,8 +91,19 @@ class PrivacyDashboard(context: Context) {
         }
     }
 
+    private val pendingUpgrade = HashSet<String>()
+
+    /** Позначає, що наступна сторінка вкладки завантажується після автоматичного http→https. */
+    fun markHttpsUpgrade(tabId: String) {
+        synchronized(lock) { pendingUpgrade.add(tabId) }
+    }
+
     fun beginPage(tabId: String, url: String) {
-        synchronized(lock) { pages[tabId] = PageStats(url) }
+        synchronized(lock) {
+            val p = PageStats(url)
+            if (pendingUpgrade.remove(tabId)) p.httpsUpgraded = 1
+            pages[tabId] = p
+        }
         notifyChanged()
     }
 
@@ -119,6 +138,13 @@ class PrivacyDashboard(context: Context) {
         it.blockedDomains.getOrPut(category) { HashSet() }.add(host)
         val prev = it.blockedHosts[host]
         it.blockedHosts[host] = category to ((prev?.second ?: 0) + 1)
+        lifetime++
+    }
+
+    fun recordStrictBlocked(tabId: String, host: String) = withPage(tabId) {
+        it.blocked++
+        it.strictBlocked++
+        it.strictHosts[host] = (it.strictHosts[host] ?: 0) + 1
         lifetime++
     }
 
@@ -157,6 +183,9 @@ class PrivacyDashboard(context: Context) {
                 suspicious = p.suspicious.entries.map { e -> SuspiciousRequest(e.key.substringBefore('|'), e.value) },
                 fingerprintAttempts = p.fingerprint.toList(),
                 permissionEvents = p.permissions.toList(),
+                strictBlocked = p.strictBlocked,
+                strictHosts = p.strictHosts.entries.sortedByDescending { it.value }.take(30).map { it.key to it.value },
+                httpsUpgraded = p.httpsUpgraded,
             )
         }
     }

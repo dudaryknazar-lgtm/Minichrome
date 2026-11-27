@@ -45,6 +45,7 @@ import com.minibrowser.ui.BrowserUiState
 import com.minibrowser.ui.BookmarksScreen
 import com.minibrowser.ui.CookieManagerScreen
 import com.minibrowser.ui.DownloadsScreen
+import com.minibrowser.ui.ExposureScreen
 import com.minibrowser.ui.FilterListsScreen
 import com.minibrowser.ui.HistoryScreen
 import com.minibrowser.ui.MiniBrowserTheme
@@ -236,6 +237,7 @@ class MainActivity : ComponentActivity() {
                                     Screen.PERMISSIONS -> SitePermissionsScreen(vm)
                                     Screen.FILTERS -> FilterListsScreen(vm)
                                     Screen.PRIVATE_INFO -> PrivateInfoScreen(vm)
+                                    Screen.EXPOSURE -> ExposureScreen(vm)
                                 }
                             }
                         }

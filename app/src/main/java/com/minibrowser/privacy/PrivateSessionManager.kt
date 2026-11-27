@@ -51,6 +51,16 @@ class PrivateSessionManager {
         }
     }
 
+    /** Сховище (localStorage, IndexedDB…) приватного профілю або null, якщо ізоляції немає. */
+    fun webStorageOrNull(): android.webkit.WebStorage? {
+        if (!isolationSupported || !profileInUse) return null
+        return try {
+            ProfileStore.getInstance().getOrCreateProfile(PROFILE_NAME).webStorage
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Видаляє профіль і всі його дані. Повертає false, якщо профіль ще використовується. */
     fun endSession(): Boolean {
         if (!isolationSupported) return true

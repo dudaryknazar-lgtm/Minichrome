@@ -71,3 +71,7 @@ app/src/main/assets/filters/  easylist.txt, easyprivacy.txt, malware.txt, finger
 ## Ліцензії списків
 
 EasyList / EasyPrivacy — CC BY-SA 3.0 / GPLv3+, URLhaus (abuse.ch) — CC0. Див. `assets/filters/NOTICE.txt`.
+
+## Anti-Tracking / рівні захисту (додано)
+Три рівні для кожного сайту (Вимкнено / Стандартний / Суворий), авто-https, очищення даних сайту, екран «Що бачать сайти».
+Повний аналіз і межі WebView — у [PRIVACY.md](PRIVACY.md).

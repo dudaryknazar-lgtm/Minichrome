@@ -42,9 +42,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.minibrowser.BrowserViewModel
 import com.minibrowser.Screen
+import com.minibrowser.data.UrlUtils
 import com.minibrowser.privacy.ListCategory
 import com.minibrowser.privacy.PermissionDecision
 import com.minibrowser.privacy.PrivacySnapshot
+import com.minibrowser.privacy.ProtectionLevel
 
 private fun ListCategory.title(): String = when (this) {
     ListCategory.AD -> "Реклама"
@@ -62,7 +64,7 @@ fun PrivacyDashboardSheet(vm: BrowserViewModel, onDismiss: () -> Unit) {
     val changes by vm.dashboard.changes.collectAsState()
     val settings by vm.settings.state.collectAsState()
     val snap: PrivacySnapshot = remember(changes, tab?.id) { vm.dashboard.snapshot(tab?.id) }
-    var protectionOff by remember(tab?.host) { mutableStateOf(vm.isSiteProtectionOff()) }
+    var level by remember(tab?.host) { mutableStateOf(vm.siteLevel()) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val host = tab?.host.orEmpty()
 
@@ -88,13 +90,14 @@ fun PrivacyDashboardSheet(vm: BrowserViewModel, onDismiss: () -> Unit) {
                     Pill(
                         when {
                             host.isEmpty() -> "Немає сторінки"
-                            protectionOff -> "Захист для сайту вимкнено"
+                            level == ProtectionLevel.OFF -> "Захист для сайту вимкнено"
+                            level == ProtectionLevel.STRICT -> "Суворий захист"
                             !protectionAny -> "Захист вимкнено в налаштуваннях"
                             else -> "Захист активний"
                         },
                         when {
                             host.isEmpty() -> c.secondary
-                            protectionOff || !protectionAny -> c.warning
+                            level == ProtectionLevel.OFF || !protectionAny -> c.warning
                             else -> c.success
                         },
                     )
@@ -117,6 +120,11 @@ fun PrivacyDashboardSheet(vm: BrowserViewModel, onDismiss: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatTile("Рекламних доменів", snap.blockedDomains(ListCategory.AD).toString(), c.accent, Modifier.weight(1f))
                 StatTile("Трекерів виявлено", snap.detectedDomains(ListCategory.TRACKER).toString(), c.accent, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("Суворий режим: сторонніх заблоковано", snap.strictBlocked.toString(), c.accent, Modifier.weight(1f))
+                StatTile("http → https", if (snap.httpsUpgraded > 0) "Так" else "Ні", if (snap.httpsUpgraded > 0) c.success else c.secondary, Modifier.weight(1f))
             }
             Text(
                 "* Кількість сторонніх запитів, надісланих при вимкнених сторонніх cookie. WebView не повідомляє, скільки окремих cookie було відхилено.",
@@ -182,6 +190,30 @@ fun PrivacyDashboardSheet(vm: BrowserViewModel, onDismiss: () -> Unit) {
                 }
             }
 
+            // --- сторонні домени
+            SheetHeader("Сторонні домени (${snap.thirdPartyHosts.size})")
+            if (snap.thirdPartyHosts.isEmpty()) {
+                Muted("Сторінка не звертається до сторонніх доменів.")
+            } else {
+                val blockedSet = snap.topBlocked.map { it.host }.toSet() + snap.strictHosts.map { it.first }.toSet()
+                snap.thirdPartyHosts.take(40).forEach { h ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(h, color = c.text, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Pill(if (h in blockedSet) "заблоковано" else "дозволено", if (h in blockedSet) c.accent else c.secondary)
+                    }
+                }
+                if (snap.thirdPartyHosts.size > 40) Muted("…і ще ${snap.thirdPartyHosts.size - 40}")
+            }
+            if (snap.strictHosts.isNotEmpty()) {
+                SheetHeader("Заблоковано суворим режимом")
+                snap.strictHosts.take(8).forEach { (h, n) ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(h, color = c.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text("×$n", color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
             // --- дозволи
             SheetHeader("Використані дозволи")
             if (snap.permissionEvents.isEmpty()) {
@@ -205,15 +237,29 @@ fun PrivacyDashboardSheet(vm: BrowserViewModel, onDismiss: () -> Unit) {
             // --- керування
             SheetHeader("Керування")
             if (host.isNotEmpty()) {
-                SwitchRow(
-                    "Захист на цьому сайті",
-                    "Вимкніть, якщо сайт працює некоректно. Перезавантажте сторінку, щоб застосувати.",
-                    !protectionOff,
-                    { on ->
-                        vm.setSiteProtection(on)
-                        protectionOff = !on
-                    },
-                )
+                Text("Рівень захисту для ${UrlUtils.registrableDomain(host)}", color = c.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ProtectionLevel.entries.forEach { l ->
+                        val sel = level == l
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .background(if (sel) c.accent else c.card)
+                                .pressable(onClick = {
+                                    if (!sel) {
+                                        level = l
+                                        vm.setSiteLevel(l)
+                                    }
+                                })
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(l.label, color = if (sel) Color.White else c.secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                Text(level.description, color = c.secondary, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp))
+                Text("Сторінка перезавантажується автоматично, щоб застосувати рівень.", color = c.secondary, fontSize = 11.sp)
             }
             NavRow(
                 Icons.Filled.Security, "Налаштування приватності", null,

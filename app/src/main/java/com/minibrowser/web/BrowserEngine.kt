@@ -71,6 +71,46 @@ class BrowserEngine(
         var errorLoadPending = false
         var errorUrl: String? = null
         var sslHandledUrl: String? = null
+        /** Адреса, на яку http було змінено на https, і початкова http-адреса (для запиту при помилці). */
+        var upgradedTo: String? = null
+        var upgradedFrom: String? = null
+        val upgradeAttempts = HashMap<String, Int>()
+        /** Хост поточної сторінки (для очищення даних суворого рівня після виходу з сайту). */
+        var siteHost: String? = null
+    }
+
+    /** Повертає https-варіант http-адреси, якщо потрібно, і веде облік (захист від циклів перенаправлень). */
+    private fun tryUpgrade(rt: TabRuntime, url: String): String? {
+        val https = privacy.httpsUpgradeFor(url) ?: return null
+        val n = (rt.upgradeAttempts[url] ?: 0) + 1
+        rt.upgradeAttempts[url] = n
+        if (n > 2) {
+            // Сайт сам постійно повертає на http — цикл. Дозволяємо http для цього хоста й повідомляємо.
+            UrlUtils.hostOf(url)?.let { privacy.allowHttp(it) }
+            host?.toast("Сайт постійно перенаправляє на http — відкрито без шифрування")
+            return null
+        }
+        rt.upgradedTo = https
+        rt.upgradedFrom = url
+        privacy.dashboard.markHttpsUpgrade(rt.tabId)
+        return https
+    }
+
+    /**
+     * Суворий рівень: після виходу з сайту (або закриття вкладки) видаляє його cookie та localStorage,
+     * якщо жодна інша вкладка того ж типу не відкрита на цьому сайті.
+     */
+    private fun cleanupLeftSite(rt: TabRuntime, leftHost: String?, newHost: String?) {
+        if (leftHost.isNullOrEmpty()) return
+        val key = UrlUtils.registrableDomain(leftHost)
+        if (newHost != null && UrlUtils.registrableDomain(newHost) == key) return
+        if (privacy.levelFor(leftHost) != com.minibrowser.privacy.ProtectionLevel.STRICT) return
+        val stillOpen = tabManager.tabs.value.any {
+            it.id != rt.tabId && it.isPrivate == rt.isPrivate && it.host.isNotEmpty() && UrlUtils.registrableDomain(it.host) == key
+        }
+        if (stillOpen) return
+        privacy.clearSiteData(leftHost, rt.isPrivate)
+        host?.toast("Суворий режим: дані сайту $key видалено")
     }
 
     private val runtimes = ConcurrentHashMap<String, TabRuntime>()
@@ -221,9 +261,11 @@ class BrowserEngine(
 
     fun load(tabId: String, url: String) {
         val rt = runtimes[tabId] ?: return
-        rt.pageUrl = url
+        val target = tryUpgrade(rt, url) ?: url
+        rt.pageUrl = target
         rt.showingError = false
-        rt.webView.loadUrl(url)
+        privacy.applyCookiePolicy(rt.webView, rt.isPrivate, UrlUtils.hostOf(target))
+        rt.webView.loadUrl(target)
     }
 
     /** Повертає true, якщо WebView сам обробив «назад». */
@@ -296,7 +338,10 @@ class BrowserEngine(
     /** Знищує WebView закритої вкладки та, за потреби, завершує приватну сесію. */
     fun destroy(tabId: String) {
         val rt = runtimes.remove(tabId)
-        if (rt != null) release(rt)
+        if (rt != null) {
+            release(rt)
+            cleanupLeftSite(rt, rt.siteHost, null)
+        }
         privacy.dashboard.forget(tabId)
     }
 
@@ -328,7 +373,16 @@ class BrowserEngine(
     private fun handleNavigation(rt: TabRuntime, uri: Uri, gesture: Boolean): Boolean {
         val scheme = uri.scheme?.lowercase() ?: return false
         return when (scheme) {
-            "http", "https" -> false
+            "https" -> false
+            "http" -> {
+                val upgraded = tryUpgrade(rt, uri.toString())
+                if (upgraded != null) {
+                    mainHandler.post { load(rt.tabId, upgraded) }
+                    true
+                } else {
+                    false
+                }
+            }
             InternalPages.SCHEME -> {
                 handleInternal(rt, uri)
                 true
@@ -373,6 +427,10 @@ class BrowserEngine(
             "retry" -> reload(rt.tabId)
             "proceed" -> if (target != null) {
                 UrlUtils.hostOf(target)?.let { privacy.allowSuspicious(it) }
+                load(rt.tabId, target)
+            }
+            "http-proceed" -> if (target != null) {
+                UrlUtils.hostOf(target)?.let { privacy.allowHttp(it) }
                 load(rt.tabId, target)
             }
             "ssl-proceed" -> if (target != null) {
@@ -425,6 +483,13 @@ class BrowserEngine(
                 rt.errorUrl = null
             }
             val showing = rt.showingError
+            if (UrlUtils.isHttp(u) && !showing) {
+                val newHost = UrlUtils.hostOf(u)
+                view?.let { privacy.applyCookiePolicy(it, rt.isPrivate, newHost) }
+                val left = rt.siteHost
+                rt.siteHost = newHost
+                cleanupLeftSite(rt, left, newHost)
+            }
             tabManager.update(rt.tabId) {
                 it.copy(
                     url = if (UrlUtils.isHttp(u)) u else it.url,
@@ -486,7 +551,9 @@ class BrowserEngine(
                 else -> "Не вдалося відкрити сторінку" to "Сталася помилка під час завантаження."
             }
             val shown = description.ifBlank { null }
-            showErrorPage(rt, wv, failing, InternalPages.errorPage(failing, title, msg, shown ?: err.errorCode.toString()))
+            // Якщо помилка сталася на автоматично оновленому https-адресі — пропонуємо http, але лише за явним рішенням.
+            val httpFallback = if (failing == rt.upgradedTo) rt.upgradedFrom else null
+            showErrorPage(rt, wv, failing, InternalPages.errorPage(failing, title, msg, shown ?: err.errorCode.toString(), httpFallback))
         }
 
         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {

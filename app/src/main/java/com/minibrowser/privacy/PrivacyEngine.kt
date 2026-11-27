@@ -37,26 +37,113 @@ class PrivacyEngine(
         suspiciousAllowed.add(host)
     }
 
-    fun isProtectionOffFor(pageHost: String?): Boolean {
-        if (pageHost.isNullOrEmpty()) return false
-        return UrlUtils.registrableDomain(pageHost) in settings.value.protectionOffSites
-    }
-
-    fun setSiteProtection(pageHost: String, enabled: Boolean) {
+    /** Рівень захисту для сайту: явне налаштування сайту або рівень за замовчуванням. */
+    fun levelFor(pageHost: String?): ProtectionLevel {
+        val s = settings.value
+        if (pageHost.isNullOrEmpty()) return if (s.strictByDefault) ProtectionLevel.STRICT else ProtectionLevel.STANDARD
         val key = UrlUtils.registrableDomain(pageHost)
-        settings.update { s ->
-            s.copy(protectionOffSites = if (enabled) s.protectionOffSites - key else s.protectionOffSites + key)
+        return when {
+            key in s.protectionOffSites -> ProtectionLevel.OFF
+            key in s.strictSites -> ProtectionLevel.STRICT
+            key in s.standardSites -> ProtectionLevel.STANDARD
+            s.strictByDefault -> ProtectionLevel.STRICT
+            else -> ProtectionLevel.STANDARD
         }
     }
 
-    /** Застосовує поточні налаштування до WebView (викликати на UI-потоці). */
-    fun applySettings(webView: WebView, isPrivate: Boolean) {
-        val s = settings.value
-        cookies.configure(webView, isPrivate, allowThirdParty = !s.thirdPartyCookieProtection)
-        fingerprint.setEnabled(webView, s.fingerprintProtection)
+    fun isProtectionOffFor(pageHost: String?): Boolean =
+        !pageHost.isNullOrEmpty() && levelFor(pageHost) == ProtectionLevel.OFF
+
+    fun setSiteLevel(pageHost: String, level: ProtectionLevel) {
+        val key = UrlUtils.registrableDomain(pageHost)
+        settings.update { s ->
+            s.copy(
+                protectionOffSites = s.protectionOffSites - key + if (level == ProtectionLevel.OFF) setOf(key) else emptySet(),
+                strictSites = s.strictSites - key + if (level == ProtectionLevel.STRICT) setOf(key) else emptySet(),
+                standardSites = s.standardSites - key + if (level == ProtectionLevel.STANDARD) setOf(key) else emptySet(),
+            )
+        }
     }
 
-    private fun enabled(category: ListCategory): Boolean {
+    /** Повертає сайт до рівня за замовчуванням. */
+    fun resetSiteLevel(key: String) {
+        settings.update { s ->
+            s.copy(
+                protectionOffSites = s.protectionOffSites - key,
+                strictSites = s.strictSites - key,
+                standardSites = s.standardSites - key,
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------ https-first
+
+    private val httpAllowed = ConcurrentHashMap.newKeySet<String>()
+
+    /** Користувач свідомо дозволив небезпечний http для хоста (до кінця процесу). */
+    fun allowHttp(host: String) {
+        httpAllowed.add(host)
+    }
+
+    /**
+     * Повертає https-варіант адреси, якщо http-адресу треба автоматично оновити, інакше null.
+     * Не чіпає IP-адреси, localhost, одноярусні та .local-імена, а також хости, для яких користувач дозволив http.
+     */
+    fun httpsUpgradeFor(url: String): String? {
+        val s = settings.value
+        if (!s.httpsUpgrade) return null
+        if (!url.startsWith("http://", ignoreCase = true)) return null
+        val host = UrlUtils.hostOf(url) ?: return null
+        if (host in httpAllowed) return null
+        if (!host.contains('.') || UrlUtils.isIpAddress(host) || host.endsWith(".local") || host.endsWith(".localhost")) return null
+        if (levelFor(host) == ProtectionLevel.OFF) return null
+        return "https://" + url.substring("http://".length)
+    }
+
+    // ------------------------------------------------------------------ дані сайту
+
+    /**
+     * Видаляє cookie та сховище (localStorage, IndexedDB, WebSQL) сайту.
+     * Повертає кількість видалених cookie. Кеш HTTP за сайтами WebView видаляти не вміє.
+     */
+    fun clearSiteData(host: String, isPrivate: Boolean): Int {
+        if (host.isEmpty()) return 0
+        val n = cookies.clearSite("https://$host/", isPrivate)
+        try {
+            val ws = (if (isPrivate) privateSession.webStorageOrNull() else null) ?: android.webkit.WebStorage.getInstance()
+            ws.deleteOrigin("https://$host")
+            ws.deleteOrigin("http://$host")
+            val reg = UrlUtils.registrableDomain(host)
+            if (reg != host) {
+                ws.deleteOrigin("https://$reg")
+                ws.deleteOrigin("http://$reg")
+            }
+        } catch (_: Exception) {
+        }
+        cookies.flush()
+        return n
+    }
+
+    /** Застосовує поточні налаштування до WebView (викликати на UI-потоці). */
+    fun applySettings(webView: WebView, isPrivate: Boolean, pageHost: String? = null) {
+        val s = settings.value
+        fingerprint.setEnabled(webView, s.fingerprintProtection)
+        applyCookiePolicy(webView, isPrivate, pageHost)
+    }
+
+    /** Політика сторонніх cookie залежить від рівня захисту поточного сайту (діє на весь WebView вкладки). */
+    fun applyCookiePolicy(webView: WebView, isPrivate: Boolean, pageHost: String?) {
+        val s = settings.value
+        val allow = when (levelFor(pageHost)) {
+            ProtectionLevel.OFF -> true
+            ProtectionLevel.STRICT -> false
+            ProtectionLevel.STANDARD -> !s.thirdPartyCookieProtection
+        }
+        cookies.configure(webView, isPrivate, allowThirdParty = allow)
+    }
+
+    private fun enabled(category: ListCategory, level: ProtectionLevel): Boolean {
+        if (level == ProtectionLevel.STRICT) return true
         val s = settings.value
         return when (category) {
             ListCategory.AD -> s.adBlocking
@@ -82,7 +169,7 @@ class PrivacyEngine(
         if (request.isForMainFrame) {
             dashboard.beginPage(tabId, url)
             dashboard.recordRequest(tabId, thirdParty = false, host = host)
-            if (s.suspiciousDomainWarning && !isProtectionOffFor(host) && host !in suspiciousAllowed) {
+            if ((s.suspiciousDomainWarning || levelFor(host) == ProtectionLevel.STRICT) && !isProtectionOffFor(host) && host !in suspiciousAllowed) {
                 filterLists.awaitReady(3000)
                 if (blocker.isMalwareHost(host)) {
                     dashboard.recordSuspicious(tabId, host, "Домен у списку шкідливих (URLhaus) — показано попередження")
@@ -97,7 +184,8 @@ class PrivacyEngine(
         val third = UrlUtils.isThirdParty(host, pageHost)
         dashboard.recordRequest(tabId, third, host)
 
-        if (isProtectionOffFor(pageHost)) return null
+        val level = levelFor(pageHost)
+        if (level == ProtectionLevel.OFF) return null
 
         // Підозрілі сторонні запити (евристики, див. README).
         if (third && UrlUtils.isIpAddress(host)) {
@@ -118,13 +206,23 @@ class PrivacyEngine(
             if (verdict.matched.any { it.category == ListCategory.MALWARE }) {
                 dashboard.recordSuspicious(tabId, host, "Домен у списку шкідливих (URLhaus)")
             }
-            val by = verdict.blockedBy { enabled(it) }
+            val by = verdict.blockedBy { enabled(it, level) }
             if (by != null) {
                 dashboard.recordBlocked(tabId, host, by.category)
                 return blockedResponse()
             }
         }
-        if (third && s.thirdPartyCookieProtection) dashboard.recordCookieSuppressed(tabId)
+        // Суворий рівень: усі сторонні скрипти, iframe, XHR/fetch та object блокуються, навіть якщо їх немає у списках.
+        // Тип ресурсу визначається евристично; запити з невідомим типом (0) не блокуються.
+        if (level == ProtectionLevel.STRICT && third) {
+            val strictTypes = ResourceType.SCRIPT or ResourceType.SUBDOC or ResourceType.XHR or ResourceType.OBJECT
+            if (type and strictTypes != 0) {
+                dashboard.recordStrictBlocked(tabId, host)
+                return blockedResponse()
+            }
+        }
+        val cookiesOff = level == ProtectionLevel.STRICT || (level == ProtectionLevel.STANDARD && s.thirdPartyCookieProtection)
+        if (third && cookiesOff) dashboard.recordCookieSuppressed(tabId)
         return null
     }
 

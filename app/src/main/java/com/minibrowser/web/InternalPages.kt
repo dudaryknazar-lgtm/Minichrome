@@ -39,7 +39,7 @@ object InternalPages {
 </style></head><body><div class="wrap"><div class="icon">$icon</div>$body</div></body></html>
 """.trimIndent()
 
-    fun errorPage(url: String, title: String, message: String, code: String?): String = page(
+    fun errorPage(url: String, title: String, message: String, code: String?, insecureHttpUrl: String? = null): String = page(
         title, "#8875FF", "!",
         """
 <h1>${esc(title)}</h1>
@@ -48,6 +48,7 @@ object InternalPages {
 ${if (code != null) "<p>Код помилки: <code>${esc(code)}</code></p>" else ""}
 <a class="btn" href="$SCHEME://retry">Спробувати ще раз</a>
 <a class="btn alt" href="$SCHEME://back">Назад</a>
+${if (insecureHttpUrl != null) "<p>Сайт, імовірно, не підтримує https. Дані через http передаються без шифрування.</p><a class=\"btn danger\" href=\"$SCHEME://http-proceed?url=${enc(insecureHttpUrl)}\">Відкрити через http (без шифрування)</a>" else ""}
 """,
     )
 

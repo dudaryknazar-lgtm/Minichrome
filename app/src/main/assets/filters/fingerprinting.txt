@@ -1,0 +1,32 @@
+! MiniBrowser: невеликий вбудований список відомих fingerprinting-сервісів і бібліотек (ABP-синтаксис).
+! Це не повний список: основне покриття дає EasyPrivacy. Додавайте власні правила сюди.
+||fpjs.io^$third-party
+||fpcdn.io^$third-party
+||api.fpjs.io^
+||fingerprintjs.com^$third-party
+||fingerprint.com^$third-party
+||iovation.com^$third-party
+||iesnare.com^$third-party
+||threatmetrix.com^$third-party
+||online-metrix.net^$third-party
+||deviceatlas.com^$third-party
+||bluecava.com^$third-party
+||siftscience.com^$third-party
+||seon.io^$third-party
+||fraudmetrix.cn^$third-party
+||cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/
+||cdnjs.cloudflare.com/ajax/libs/fingerprintjs/
+||cdn.jsdelivr.net/npm/@fingerprintjs/
+||cdn.jsdelivr.net/npm/fingerprintjs2
+||unpkg.com/@fingerprintjs/
+||unpkg.com/fingerprintjs2
+/fingerprint2.js
+/fingerprint2.min.js
+/fingerprintjs2.min.js
+/fingerprintjs.min.js
+/fingerprintjs/
+/clientjs.min.js$script
+/evercookie.js$script
+/evercookie.min.js$script
+/imprint.min.js$script,third-party
+||maxmind.com/js/device.js

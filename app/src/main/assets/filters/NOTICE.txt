@@ -1,0 +1,5 @@
+Вбудовані знімки списків фільтрів:
+ - EasyList та EasyPrivacy (https://easylist.to) — подвійна ліцензія GPLv3+ / CC BY-SA 3.0, © The EasyList authors.
+ - malware.txt — URLhaus Malicious URL Blocklist, збірка curbengh/urlhaus-filter (CC0), дані abuse.ch (CC0).
+ - fingerprinting.txt — власний невеликий список MiniBrowser.
+Свіжі версії завантажуються у Налаштування → Приватність → Списки фільтрів.

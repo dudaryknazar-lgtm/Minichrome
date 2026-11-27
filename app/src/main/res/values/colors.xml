@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="mb_bg">#101116</color>
+    <color name="mb_panel">#191A23</color>
+    <color name="mb_accent">#8875FF</color>
+</resources>

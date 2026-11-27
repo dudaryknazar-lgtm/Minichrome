@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Браузер має відкривати і http-сайти, тому cleartext дозволено на рівні програми.
+  Користувацькі CA НЕ довіряються (лише системні), SSL-помилки ніколи не обходяться автоматично.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
